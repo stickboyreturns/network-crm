@@ -9,6 +9,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.post('/scan', async (req, res) => {
   try {
     const { imageBase64, imageType } = req.body;
+    if (!imageBase64) return res.json({ ok: false, error: 'No image data received' });
+    if (!process.env.ANTHROPIC_API_KEY) return res.json({ ok: false, error: 'API key not set' });
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -17,7 +20,7 @@ app.post('/scan', async (req, res) => {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-opus-4-5',
         max_tokens: 1000,
         messages: [{
           role: 'user',
@@ -28,41 +31,20 @@ app.post('/scan', async (req, res) => {
             },
             {
               type: 'text',
-              text: `You are helping extract contact information from an image for a networking CRM.
-
-Look at this image carefully. It could be a business card, Instagram profile screenshot, LinkedIn profile, or any image with contact info.
-
-Extract whatever you can find and return ONLY a valid JSON object with these exact keys:
-{
-  "name": "full name or best guess",
-  "contact": "email, phone, instagram handle (@username format), or URL",
-  "location": "city in UPPERCASE e.g. TORONTO or NYC, empty string if not visible",
-  "notes": "job title, company, bio text, or any useful context",
-  "value": "",
-  "next": "",
-  "reached": "N"
-}
-
-Rules:
-- Return ONLY the JSON object, no markdown, no explanation
-- For contact prefer: email > phone > instagram handle (@username) > website URL
-- If you see an instagram.com URL, convert it to @username format
-- If a field is not visible, use empty string`
+              text: `Extract contact info from this image and return ONLY a JSON object with these keys: name, contact (email/phone/@instagram), location (city UPPERCASE), notes (job/company/bio), value (""), next (""), reached ("N"). No markdown, no explanation, just the JSON.`
             }
           ]
         }]
       })
     });
-    const data = await response.json();
+
+    const raw = await response.text();
+    console.log('API response:', raw);
+    const data = JSON.parse(raw);
+    if (data.error) return res.json({ ok: false, error: data.error.message });
     const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
     const clean = text.replace(/```json|```/g, '').trim();
     const extracted = JSON.parse(clean);
     res.json({ ok: true, contact: extracted });
   } catch (err) {
-    console.error(err);
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Running on port', PORT));
+    console.error('Scan error:', err);
