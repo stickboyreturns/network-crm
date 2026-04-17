@@ -1,11 +1,85 @@
 const express = require('express');
 const https = require('https');
 const path = require('path');
+const { Client } = require('pg');
 const app = express();
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+async function getDb() {
+  const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  await client.connect();
+  return client;
+}
+
+async function initDb() {
+  const db = await getDb();
+  await db.query(`CREATE TABLE IF NOT EXISTS contacts (
+    id SERIAL PRIMARY KEY,
+    name TEXT, contact TEXT, reached TEXT DEFAULT 'N',
+    notes TEXT, value TEXT, next TEXT, location TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  )`);
+  await db.end();
+  console.log('DB ready');
+}
+
+// Get all contacts
+app.get('/api/contacts', async (req, res) => {
+  const db = await getDb();
+  const result = await db.query('SELECT * FROM contacts ORDER BY created_at DESC');
+  await db.end();
+  res.json(result.rows);
+});
+
+// Add a contact
+app.post('/api/contacts', async (req, res) => {
+  const { name, contact, reached, notes, value, next, location } = req.body;
+  const db = await getDb();
+  const result = await db.query(
+    'INSERT INTO contacts (name,contact,reached,notes,value,next,location) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+    [name, contact, reached||'N', notes, value, next, location]
+  );
+  await db.end();
+  res.json({ ok: true, contact: result.rows[0] });
+});
+
+// Add multiple contacts
+app.post('/api/contacts/bulk', async (req, res) => {
+  const { contacts } = req.body;
+  const db = await getDb();
+  for (const c of contacts) {
+    await db.query(
+      'INSERT INTO contacts (name,contact,reached,notes,value,next,location) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [c.name, c.contact, c.reached||'N', c.notes, c.value, c.next, c.location]
+    );
+  }
+  await db.end();
+  res.json({ ok: true, count: contacts.length });
+});
+
+// Update a contact
+app.put('/api/contacts/:id', async (req, res) => {
+  const { name, contact, reached, notes, value, next, location } = req.body;
+  const db = await getDb();
+  await db.query(
+    'UPDATE contacts SET name=$1,contact=$2,reached=$3,notes=$4,value=$5,next=$6,location=$7 WHERE id=$8',
+    [name, contact, reached, notes, value, next, location, req.params.id]
+  );
+  await db.end();
+  res.json({ ok: true });
+});
+
+// Delete a contact
+app.delete('/api/contacts/:id', async (req, res) => {
+  const db = await getDb();
+  await db.query('DELETE FROM contacts WHERE id=$1', [req.params.id]);
+  await db.end();
+  res.json({ ok: true });
+});
+
+// Scan image with Claude
 app.post('/scan', async (req, res) => {
   try {
     const { imageBase64, imageType } = req.body;
@@ -38,5 +112,7 @@ app.post('/scan', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Running on port', PORT));
+initDb().then(() => {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => console.log('Running on port', PORT));
+});
