@@ -19,13 +19,14 @@ async function initDb() {
     id SERIAL PRIMARY KEY,
     name TEXT, contact TEXT, reached TEXT DEFAULT 'N',
     notes TEXT, value TEXT, next TEXT, location TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_contacted TIMESTAMP
   )`);
+  await db.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_contacted TIMESTAMP`);
   await db.end();
   console.log('DB ready');
 }
 
-// Get all contacts
 app.get('/api/contacts', async (req, res) => {
   const db = await getDb();
   const result = await db.query('SELECT * FROM contacts ORDER BY created_at DESC');
@@ -33,7 +34,6 @@ app.get('/api/contacts', async (req, res) => {
   res.json(result.rows);
 });
 
-// Add a contact
 app.post('/api/contacts', async (req, res) => {
   const { name, contact, reached, notes, value, next, location } = req.body;
   const db = await getDb();
@@ -45,7 +45,6 @@ app.post('/api/contacts', async (req, res) => {
   res.json({ ok: true, contact: result.rows[0] });
 });
 
-// Add multiple contacts
 app.post('/api/contacts/bulk', async (req, res) => {
   const { contacts } = req.body;
   const db = await getDb();
@@ -59,7 +58,6 @@ app.post('/api/contacts/bulk', async (req, res) => {
   res.json({ ok: true, count: contacts.length });
 });
 
-// Update a contact
 app.put('/api/contacts/:id', async (req, res) => {
   const { name, contact, reached, notes, value, next, location } = req.body;
   const db = await getDb();
@@ -71,7 +69,13 @@ app.put('/api/contacts/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Delete a contact
+app.post('/api/contacts/:id/followup', async (req, res) => {
+  const db = await getDb();
+  await db.query('UPDATE contacts SET last_contacted=NOW(), reached=$1 WHERE id=$2', ['Y', req.params.id]);
+  await db.end();
+  res.json({ ok: true });
+});
+
 app.delete('/api/contacts/:id', async (req, res) => {
   const db = await getDb();
   await db.query('DELETE FROM contacts WHERE id=$1', [req.params.id]);
@@ -79,7 +83,6 @@ app.delete('/api/contacts/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Scan image with Claude
 app.post('/scan', async (req, res) => {
   try {
     const { imageBase64, imageType } = req.body;
