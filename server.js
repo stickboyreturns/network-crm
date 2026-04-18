@@ -6,6 +6,7 @@ const app = express();
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/tracker', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tracker.html')));
 
 async function getDb() {
   const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
